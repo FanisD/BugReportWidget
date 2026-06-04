@@ -1,113 +1,98 @@
 # Bug Reporter Widget Project
 
-A fullstack bug reporting widget with a draggable floating button UI (React + Vite) and a Node.js/Express backend, using PostgreSQL for storage and Resend for email delivery.
+A fullstack bug reporting widget with a draggable floating button UI (React + Vite) and a Node.js/Express backend. 
+It uses PostgreSQL for tracking bug reports and Resend for transactional email delivery.
 
 ## Tech Stack & Tools
-- **Frontend:** React 19, Vite
+- **Frontend:** React 19, Vite (configured in Library Mode for NPM distribution)
 - **Backend:** Express 5, Node.js, Multer (file upload), Sharp (image to PNG conversion)
 - **Database:** PostgreSQL
 - **Email:** Resend (https://resend.com/) for transactional email delivery
-- **Other Tools:**
-  - `axios` (frontend requests)
-  - `eslint` (linting)
-  - `sharp` (converts all bug screenshot uploads to PNG for reliability)
-
-## Prerequisites
-- Node.js 18+
-- NPM 9+
-- PostgreSQL (running and accessible)
-- Resend account for email API keys
+- **Deployment:** Docker & Docker Compose for the backend API
 
 ---
 
-## Getting Started
+## 🚀 Quick Start (Production / Self-Hosting)
 
-### 1. Clone the repository
+The easiest way to host the backend is using the included Docker Compose configuration.
+
+### 1. Setup the Backend (Docker)
+1. Clone the repository and enter the backend directory:
+   ```bash
+   git clone https://github.com/FanisD/BugReportWidget.git
+   cd BugReportWidget/bug-reporter-backend
+   ```
+2. Make a copy of the `.env.example` file and rename it to `.env`. Fill in your real API keys:
+   ```env
+   RESEND_API_KEY=re_123456789...
+   NOTIFICATION_EMAIL=your.email@example.com
+   ALLOWED_ORIGINS=https://your-website.com
+   ```
+3. Start the API and PostgreSQL database:
+   ```bash
+   docker-compose up -d
+   ```
+   *(The backend will automatically create the `bug_reports` table on its first startup).*
+
+### 2. Using the Frontend Widget
+The frontend is structured as a publishable NPM package. Once published, you can install it into any React app:
+
 ```bash
-git clone https://github.com/your-username/your-bug-reporter-repo.git
-cd your-bug-reporter-repo
+npm install bug-reporter
 ```
 
-### 2. Setup the Backend
+Then drop the widget into your application:
+```jsx
+import { BugReportWidget } from 'bug-reporter';
+import 'bug-reporter/style.css';
+
+function App() {
+  return (
+    <div>
+      <BugReportWidget apiUrl="https://api.yourwebsite.com/api/bug-report" />
+    </div>
+  )
+}
+```
+
+---
+
+## 🛠️ Local Development
+
+If you want to edit the widget code or run it locally without Docker:
+
+### Backend Development
 ```bash
 cd bug-reporter-backend
 npm install
 ```
-- Create a PostgreSQL database (e.g. `bug_reporter`).
-- Create the required table:
-```sql
-CREATE TABLE bug_reports (
-  id SERIAL PRIMARY KEY,
-  title TEXT NOT NULL,
-  description TEXT NOT NULL,
-  severity TEXT,
-  category TEXT,
-  email TEXT,
-  image TEXT,
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-```
-- Configure the database connection in `db.js` (update user, password, host, DB name as needed).
-- Start the backend:
-```bash
-node server.js
-```
+- Ensure PostgreSQL is running locally.
+- Set `DATABASE_URL` in your `.env` file (e.g. `postgres://user:pass@localhost:5432/bug_reporter`).
+- Run the server: `node server.js`
 
-### 3. Setup the Frontend
+### Frontend Development (Playground)
+We kept a local testing environment in the `bug-reporter` folder so you can test changes visually before building the library.
 ```bash
-cd ../bug-reporter
+cd bug-reporter
 npm install
 npm run dev
 ```
-This runs the Vite React dev server (open `http://localhost:5173` by default).
+*(Open `http://localhost:5173` to view the widget playground).*
 
----
-
-## Environment Variables & Keys
-You need to provide your [Resend](https://resend.com/) API key and the email address you want reports to send to. These are passed into the widget as props in `src/App.jsx`:
-```jsx
-<BugReportWidget
-  to="your.email@example.com"
-  resendApiKey="re_xxxxxxxx..."
-/>
+To build the library for NPM distribution:
+```bash
+npm run build
 ```
-**Never commit real API keys to a public repository!**
-
-If you want to keep secrets out of the codebase, you can use environment variables in the backend and a .env file (optionally use the `dotenv` package).
+This will compile the widget into the `dist/` folder.
 
 ---
 
-## Useful Scripts
-**Frontend:**
-- `npm run dev` – Run React app in development mode
-- `npm run build` – Build production assets
-- `npm run preview` – Locally preview production build
-
-**Backend:**
-- `node server.js` – Start Express API (default: http://localhost:5000)
-
----
-
-## Features
-- Draggable floating bug report button (bottom-right, touch/desktop)
-- Expands into a styled modal with severity, category, email field, and screenshot upload
-- All uploaded images are converted and sent as reliable PNG screenshots for best compatibility
-- Emails include rich HTML + inline image
-- All reports saved to PostgreSQL for admin review
-
----
-
-## Troubleshooting
-- Backend must be running for the frontend widget to POST reports.
-- Ensure DB credentials and API keys are correct.
-- Make sure you do not have outdated root-level `node_modules` or lock files outside your 2 main directories!
-- Email sending issues? Check your Resend account & API key.
-
----
-
-## Docker (Optional)
-You can dockerize both frontend and backend for easy deployment (each should have its own Dockerfile and context).
-- Useful for hosting on cloud providers.
+## Security & Features
+- **No API Key Leaks:** All API keys are securely stored on the backend in the `.env` file.
+- **XSS Protection:** All user inputs are strictly escaped before being injected into HTML emails.
+- **Ephemeral Storage Safe:** Uploaded screenshots are sent as email attachments and immediately deleted from the server to prevent disk storage leaks. Images are NOT stored in the database.
+- **Rate Limiting:** Protects against spam by limiting each IP to 10 bug reports per 15 minutes.
+- **CORS Configured:** You can strict-lock the widget to only accept requests from your domain via `ALLOWED_ORIGINS`.
 
 ---
 

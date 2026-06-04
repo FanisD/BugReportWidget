@@ -1,23 +1,60 @@
-// server.js
+import "dotenv/config";
 import express from "express";
 import multer from "multer";
 import cors from "cors";
+import rateLimit from "express-rate-limit";
 import pool from "./db.js";
 import { Resend } from "resend";
 import fs from "fs";
 import sharp from 'sharp';
 import path from 'path';
 
+function escapeHtml(unsafe) {
+  if (!unsafe) return "";
+  return unsafe
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
 const app = express();
 const PORT = 5000;
 
-app.use(cors());
+const allowedOrigins = process.env.ALLOWED_ORIGINS 
+  ? process.env.ALLOWED_ORIGINS.split(",") 
+  : "*";
+
+app.use(cors({
+  origin: allowedOrigins
+}));
+
+const apiLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 10, // Limit each IP to 10 requests per 15 minutes
+  message: { error: "Too many bug reports sent from this IP, please try again after 15 minutes." },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
 app.use(express.json());
 app.use("/uploads", express.static("uploads"));
 
-const upload = multer({ dest: "uploads/" });
+const upload = multer({
+  dest: "uploads/",
+  limits: { fileSize: 5 * 1024 * 1024 }, // 5 MB max
+  fileFilter: (req, file, cb) => {
+    if (file.mimetype.startsWith("image/")) {
+      cb(null, true);
+    } else {
+      cb(new Error("Only image files are allowed"), false);
+    }
+  },
+});
 
-app.post("/api/bug-report", upload.single("image"), async (req, res) => {
+app.post("/api/bug-report", apiLimiter, upload.single("image"), async (req, res) => {
+  let attachmentFilePath = null;
   try {
     const {
       title,
@@ -25,50 +62,61 @@ app.post("/api/bug-report", upload.single("image"), async (req, res) => {
       severity,
       category,
       email,
-      to,
-      resendApiKey,
     } = req.body;
-    const image = req.file ? req.file.filename : null;
+    
+    const to = process.env.NOTIFICATION_EMAIL;
+    const resendApiKey = process.env.RESEND_API_KEY;
 
     // ✅ Validate required fields
     if (!title || !description)
       return res.status(400).json({ error: "Title and description are required" });
 
-    if (!to)
-      return res.status(400).json({ error: "Missing destination email" });
+    if (title.length > 200)
+      return res.status(400).json({ error: "Title must be less than 200 characters" });
 
-    if (!resendApiKey || !resendApiKey.startsWith("re_"))
-      return res.status(400).json({ error: "Missing or invalid Resend API key" });
+    if (description.length > 5000)
+      return res.status(400).json({ error: "Description must be less than 5000 characters" });
 
-    // ✅ Save to DB
+    if (email && email.length > 320)
+      return res.status(400).json({ error: "Email must be less than 320 characters" });
+
+    if (severity && severity.length > 50)
+      return res.status(400).json({ error: "Severity is too long" });
+
+    if (category && category.length > 50)
+      return res.status(400).json({ error: "Category is too long" });
+
+    if (!to || !resendApiKey)
+      return res.status(500).json({ error: "Server is missing email configuration" });
+
+    // ✅ Save to DB (Option A: Do not store image in DB permanently)
     const result = await pool.query(
       `INSERT INTO bug_reports (title, description, severity, category, email, image)
        VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
-      [title, description, severity, category, email, image]
+      [title, description, severity, category, email, null]
     );
 
     const newReport = result.rows[0];
 
-    // ✅ Build email content
+    // ✅ Build email content (with XSS protection)
     const htmlContent = `
       <h2>🐞 New Bug Report Submitted</h2>
-      <p><strong>Title:</strong> ${title}</p>
-      <p><strong>Description:</strong> ${description}</p>
-      <p><strong>Severity:</strong> ${severity || "Not specified"}</p>
-      <p><strong>Category:</strong> ${category || "Not specified"}</p>
-      <p><strong>Reporter Email:</strong> ${email || "Anonymous"}</p>
+      <p><strong>Title:</strong> ${escapeHtml(title)}</p>
+      <p><strong>Description:</strong> ${escapeHtml(description)}</p>
+      <p><strong>Severity:</strong> ${escapeHtml(severity) || "Not specified"}</p>
+      <p><strong>Category:</strong> ${escapeHtml(category) || "Not specified"}</p>
+      <p><strong>Reporter Email:</strong> ${escapeHtml(email) || "Anonymous"}</p>
       <p><strong>Submitted at:</strong> ${new Date(
         newReport.created_at
       ).toLocaleString()}</p>
       ${
-        image
+        req.file
           ? `<p><strong>Attached Screenshot:</strong></p><img src="cid:screenshot" alt="screenshot" style="max-width:500px;border-radius:8px;" />`
           : ""
       }
     `;
 
     // Always convert image to PNG
-    let attachmentFilePath = null;
     let attachmentFilename = 'screenshot.png';
     if (req.file) {
       const pngPath = path.join('uploads', req.file.filename + '.png');
@@ -102,11 +150,6 @@ app.post("/api/bug-report", upload.single("image"), async (req, res) => {
       })),
     });
 
-    // Clean up temp PNG after sending
-    if (attachmentFilePath && fs.existsSync(attachmentFilePath)) {
-      fs.unlinkSync(attachmentFilePath);
-    }
-
     res.status(201).json({
       message: "Bug report submitted and emailed successfully",
       report: newReport,
@@ -114,7 +157,37 @@ app.post("/api/bug-report", upload.single("image"), async (req, res) => {
   } catch (err) {
     console.error("Error processing bug report:", err);
     res.status(500).json({ error: "Failed to process bug report" });
+  } finally {
+    // ✅ Fix Storage Leak: Clean up BOTH the original file and the PNG
+    if (req.file && fs.existsSync(req.file.path)) {
+      fs.unlinkSync(req.file.path);
+    }
+    if (attachmentFilePath && fs.existsSync(attachmentFilePath)) {
+      fs.unlinkSync(attachmentFilePath);
+    }
   }
 });
 
-app.listen(PORT, () => console.log(`✅ Server running on port ${PORT}`));
+const initDb = async () => {
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS bug_reports (
+        id SERIAL PRIMARY KEY,
+        title VARCHAR(200) NOT NULL,
+        description VARCHAR(5000) NOT NULL,
+        severity VARCHAR(50),
+        category VARCHAR(50),
+        email VARCHAR(320),
+        image TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+    console.log("✅ Database initialized");
+  } catch (err) {
+    console.error("❌ Failed to initialize database:", err);
+  }
+};
+
+initDb().then(() => {
+  app.listen(PORT, () => console.log(`✅ Server running on port ${PORT}`));
+});

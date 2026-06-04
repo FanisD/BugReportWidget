@@ -1,0 +1,30 @@
+version: '3.8'
+
+services:
+  api:
+    build: .
+    ports:
+      - "5000:5000"
+    environment:
+      - RESEND_API_KEY=${RESEND_API_KEY}
+      - NOTIFICATION_EMAIL=${NOTIFICATION_EMAIL}
+      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS}
+      - DATABASE_URL=postgres://bug_reporter_user:secretpassword@db:5432/bug_reporter_db
+    depends_on:
+      - db
+    restart: unless-stopped
+
+  db:
+    image: postgres:15-alpine
+    environment:
+      - POSTGRES_USER=bug_reporter_user
+      - POSTGRES_PASSWORD=secretpassword
+      - POSTGRES_DB=bug_reporter_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+
+volumes:
+  postgres_data:

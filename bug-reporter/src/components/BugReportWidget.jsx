@@ -3,11 +3,11 @@ import React, { useState, useRef } from "react";
 import axios from "axios";
 import './BugReportWidget.css';
 
-const BugReportWidget = ({ to, resendApiKey }) => {
+const BugReportWidget = ({ apiUrl }) => {
   const [isOpen, setIsOpen] = useState(false);
   // Button position (bottom, right distances in px)
   const [buttonPos, setButtonPos] = useState({ bottom: 24, right: 24 });
-  const dragData = useRef({ dragging: false, startX: 0, startY: 0, startBottom: 0, startRight: 0 });
+  const dragData = useRef({ dragging: false, hasDragged: false, startX: 0, startY: 0, startBottom: 0, startRight: 0 });
 
   // Drag event handlers
   function onButtonMouseDown(e) {
@@ -16,6 +16,7 @@ const BugReportWidget = ({ to, resendApiKey }) => {
     const clientY = e.touches ? e.touches[0].clientY : e.clientY;
     dragData.current = {
       dragging: true,
+      hasDragged: false,
       startX: clientX,
       startY: clientY,
       startBottom: buttonPos.bottom,
@@ -36,8 +37,13 @@ const BugReportWidget = ({ to, resendApiKey }) => {
     const winH = window.innerHeight;
     // Button size for bounds enforcement
     const btnSize = 60;
-    let nextRight = dragData.current.startRight - (clientX - dragData.current.startX);
-    let nextBottom = dragData.current.startBottom - (clientY - dragData.current.startY);
+    const dx = clientX - dragData.current.startX;
+    const dy = clientY - dragData.current.startY;
+    if (Math.abs(dx) > 5 || Math.abs(dy) > 5) {
+      dragData.current.hasDragged = true;
+    }
+    let nextRight = dragData.current.startRight - dx;
+    let nextBottom = dragData.current.startBottom - dy;
     // Keep within viewport
     nextRight = Math.max(4, Math.min(winW - btnSize - 4, nextRight));
     nextBottom = Math.max(4, Math.min(winH - btnSize - 4, nextBottom));
@@ -54,43 +60,51 @@ const BugReportWidget = ({ to, resendApiKey }) => {
 
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
-  const [severity, setSeverity] = useState("");
-  const [category, setCategory] = useState("");
+  const [severity, setSeverity] = useState("Medium");
+  const [category, setCategory] = useState("Bug Report");
   const [email, setEmail] = useState("");
   const [image, setImage] = useState(null);
   const [message, setMessage] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const handleSubmit = async (e) => { 
     e.preventDefault();
+    if (isSubmitting) return;
 
     if (!title || !description) {
       setMessage("⚠️ Title and description are required.");
       return;
     }
 
+    if (!apiUrl) {
+      setMessage("⚠️ Configuration Error: Missing apiUrl prop.");
+      return;
+    }
+
+    setIsSubmitting(true);
     const formData = new FormData();
     formData.append("title", title);
     formData.append("description", description);
     formData.append("severity", severity);
     formData.append("category", category);
     formData.append("email", email);
-    formData.append("to", to);
-    formData.append("resendApiKey", resendApiKey);
     if (image) formData.append("image", image);
 
     try {
-      await axios.post("http://localhost:5000/api/bug-report", formData);
+      await axios.post(apiUrl, formData);
       setMessage("✅ Bug report submitted successfully!");
       setTitle("");
       setDescription("");
-      setSeverity("");
-      setCategory("");
+      setSeverity("Medium");
+      setCategory("Bug Report");
       setEmail("");
       setImage(null);
       setIsOpen(false);
     } catch (err) {
       console.error("❌ Error:", err);
       setMessage("❌ Failed to submit bug report.");
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -108,7 +122,13 @@ const BugReportWidget = ({ to, resendApiKey }) => {
             height: 60,
             zIndex: 1000 
           }}
-          onClick={() => setIsOpen(true)}
+          onClick={(e) => {
+            if (dragData.current.hasDragged) {
+              e.preventDefault();
+              return;
+            }
+            setIsOpen(true);
+          }}
           onMouseDown={onButtonMouseDown}
           onTouchStart={onButtonMouseDown}
         >
@@ -249,8 +269,9 @@ const BugReportWidget = ({ to, resendApiKey }) => {
                 <button
                   type="submit"
                   className="bug-widget-submit"
+                  disabled={isSubmitting}
                 >
-                  Submit Report
+                  {isSubmitting ? "Submitting..." : "Submit Report"}
                 </button>
               </div>
             </form>

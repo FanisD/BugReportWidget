@@ -6,10 +6,7 @@ function App() {
   return (
     <>
 
-    <BugReportWidget
-    to=""
-    resendApiKey=""
-    />
+    <BugReportWidget apiUrl="http://localhost:5000/api/bug-report" />
 
     </>
   )
