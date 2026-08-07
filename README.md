@@ -12,7 +12,7 @@ It uses PostgreSQL for tracking bug reports and Resend for transactional email d
 
 ---
 
-## 🚀 Quick Start (Production / Self-Hosting)
+## Quick Start (Production / Self-Hosting)
 
 The easiest way to host the backend is using the included Docker Compose configuration.
 
